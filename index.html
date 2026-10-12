@@ -1,0 +1,514 @@
+<!doctype html>
+<!-- PROTOTIPO DESECHABLE. Pregunta: ¿cómo resolvemos el alero del borde del patio? 3 variantes (A/B/C) conmutables con ?variant= y ←/→. Unidades: cm. -->
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Taller — prototipo 3D</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; font-family: system-ui, sans-serif; background: #dfe6ec; }
+  #panel { position: fixed; top: 12px; left: 12px; width: 300px; max-height: calc(100% - 100px); overflow: auto;
+    background: rgba(255,255,255,.93); border-radius: 10px; padding: 12px 14px; font-size: 13px; line-height: 1.4;
+    box-shadow: 0 2px 10px rgba(0,0,0,.15); }
+  #panel h1 { font-size: 15px; margin: 0 0 4px; }
+  #panel h2 { font-size: 13px; margin: 12px 0 4px; }
+  #panel ul { margin: 4px 0; padding-left: 18px; }
+  #panel label { display: block; cursor: pointer; }
+  .pro { color: #1a7f37; } .contra { color: #b42318; }
+  .tag { font-size: 11px; color: #666; }
+  #pill { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px;
+    background: #222; color: #fff; border-radius: 999px; padding: 6px 10px; font-size: 14px; box-shadow: 0 2px 10px rgba(0,0,0,.3); }
+  #pill button { background: #444; color: #fff; border: 0; border-radius: 999px; width: 30px; height: 30px; font-size: 16px; cursor: pointer; }
+  .lbl { background: rgba(0,0,0,.72); color: #fff; font-size: 11px; padding: 2px 6px; border-radius: 4px; white-space: nowrap; }
+  .lbl.duda { background: #b42318; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="panel">
+  <h1>Taller — prototipo 3D</h1>
+  <div class="tag">Desechable · 350 × 300 cm · medidas en cm · arrastra para rotar, rueda para zoom</div>
+  <h2>Techo</h2>
+  <div id="variantInfo"></div>
+  <h2>Vistas</h2>
+  <div><button id="vGeneral">General</button> <button id="vCielo">Corte: cielo y vapores</button> <button id="vPiso">Piso e interior</button> <button id="vNorte">Costado norte (lavadora)</button></div>
+  <h2>Capas</h2>
+  <div id="layers"></div>
+  <h2>Decidido (ADR)</h2>
+  <ul>
+    <li>0001: sin perforar el radier; estabilidad con la cadena, diagonales, lastre útil y goma dura</li>
+    <li>0002: esqueleto de 8 pilares + paneles atornillados</li>
+    <li>0003: techo hasta la esquina (375); bajada bajo el alero lateral</li>
+    <li>0004: alero frontal 30 cm con sofito</li>
+    <li>0005: portón colgante costado derecho, riel a nivel</li>
+    <li>0006: techo +35 (290 en el muro), apoyado en pilares; cadena = amarre</li>
+    <li>0007: vapores: campana, depresión, rejilla alta, ventanas practicables</li>
+    <li>0008: cielo con pendiente invertida 238 → 249</li>
+    <li>0009: piso rígido, silencioso y sellado; yunque en pedestal</li>
+    <li>0010: muros: lata prepintada + cámara + lana + OSB interior</li>
+  </ul>
+  <h2>Pendiente</h2>
+  <ul>
+    <li>Cámaras de inspección / desagüe del baño</li>
+    <li>Cubierta impermeable y antideslizante del techo</li>
+    <li>Interior: lavadora, banco, zona caliente</li>
+    <li>Electricidad (al final)</li>
+  </ul>
+</div>
+<div id="pill"><button id="prev">←</button><span id="pillLabel"></span><button id="next">→</button></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+// ---------- Datos (cm) ----------
+const ANCHO = 350, FONDO = 300, ANCHO_TECHO = 375;   // esqueleto 350; techo hasta la esquina
+const PILAR = 9;                       // pilar 9×9
+const PENDIENTE = 0.03;                // 3 %
+const TECHO_MURO = 290;                // cara superior de las vigas de techo junto al muro (+35: techo sobre la cadena)
+const VIGA_TECHO_H = 14;
+const techoTop = z => TECHO_MURO - PENDIENTE * z;
+const vigaBottom = z => techoTop(z) - VIGA_TECHO_H;
+const GOMA = 1.5, SOLERA_H = 4.5;
+const BASE = GOMA + SOLERA_H;          // donde parten los pilares
+const xs = [PILAR / 2, ANCHO / 2, ANCHO - PILAR / 2];
+const zs = [9, FONDO / 2, FONDO - PILAR / 2];   // fila trasera pasa por delante de la viga de apoyo
+
+const VARIANTES = [
+  { key: 'A', nombre: 'Alero 30 cm con sofito (decidido, ADR 0004)', alero: 30, succion: 45,
+    pros: ['Protege los paneles y la parte alta de la lluvia con viento', 'El sofito corta el viento bajo el alero'],
+    contras: ['Ubicar las cámaras de inspección: si bajo el borde del patio no pasa nada, conviene sumar 3 anclajes'] },
+];
+
+// ---------- Escena ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.setSize(innerWidth, innerHeight);
+Object.assign(labelRenderer.domElement.style, { position: 'absolute', top: '0', pointerEvents: 'none' });
+document.body.appendChild(labelRenderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xdfe6ec);
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 1, 10000);
+camera.position.set(720, 480, 980);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(175, 120, 180);
+controls.update();
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.1));
+const sol = new THREE.DirectionalLight(0xffffff, 1.4);
+sol.position.set(500, 900, 700);
+sol.castShadow = true;
+Object.assign(sol.shadow.camera, { left: -600, right: 600, top: 600, bottom: -600, far: 3000 });
+sol.shadow.mapSize.set(2048, 2048);
+scene.add(sol);
+
+const mat = c => new THREE.MeshStandardMaterial({ color: c, roughness: .85 });
+const M = {
+  madera: mat(0xc8a26b), maderaOsc: mat(0x9c7444), diagonal: mat(0xa0522d), goma: mat(0x222222),
+  muro: mat(0xb5655e), muroSup: mat(0xd9a441), cadena: mat(0x9a9a9a), puerta: mat(0x8a4b45),
+  radier: mat(0x9ea3a3), quebrado: mat(0x6d6b62), canal: mat(0x4a7fb5), vecino: mat(0xbdbdb5),
+  osb: mat(0xd8b67a), sofito: mat(0xe8e2d0), metal: mat(0x8f9aa3), perno: mat(0x333333),
+  panel: new THREE.MeshStandardMaterial({ color: 0xe9cf9f, transparent: true, opacity: .45, roughness: .9 }),
+  malla: new THREE.MeshStandardMaterial({ color: 0x333333, transparent: true, opacity: .18, side: THREE.DoubleSide }),
+};
+
+// Capas: cada una es un Group con checkbox
+const capas = {};
+function capa(nombre, visible = true) {
+  const g = new THREE.Group(); g.visible = visible; scene.add(g); capas[nombre] = g;
+  const l = document.createElement('label');
+  l.innerHTML = `<input type="checkbox" ${visible ? 'checked' : ''}> ${nombre}`;
+  l.querySelector('input').onchange = e => { g.visible = e.target.checked; };
+  document.getElementById('layers').appendChild(l);
+  return g;
+}
+
+// caja por esquinas mínimas (x0,y0,z0) y tamaño (w,h,d)
+function caja(g, x0, y0, z0, w, h, d, m) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+  mesh.position.set(x0 + w / 2, y0 + h / 2, z0 + d / 2);
+  mesh.castShadow = mesh.receiveShadow = true;
+  g.add(mesh); return mesh;
+}
+// pieza entre dos puntos (ejes), sección w×h
+function pieza(g, a, b, w, h, m) {
+  const pa = new THREE.Vector3(...a), pb = new THREE.Vector3(...b);
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, pa.distanceTo(pb)), m);
+  mesh.position.copy(pa).add(pb).multiplyScalar(.5);
+  mesh.lookAt(pb);
+  mesh.castShadow = mesh.receiveShadow = true;
+  g.add(mesh); return mesh;
+}
+function etiqueta(g, texto, x, y, z, duda = false) {
+  const d = document.createElement('div'); d.className = 'lbl' + (duda ? ' duda' : ''); d.textContent = texto;
+  const o = new CSS2DObject(d); o.position.set(x, y, z); g.add(o); return o;
+}
+
+// ---------- Entorno ----------
+const entorno = capa('Casa y entorno');
+caja(entorno, -120, -2, 0, 600, 2, 330, M.radier);
+caja(entorno, -120, -2, 330, 600, 2, 165, M.quebrado);
+caja(entorno, -120, -2, 495, 600, 1, 25, M.canal);
+caja(entorno, -120, -2, 520, 600, 2, 40, M.radier);
+caja(entorno, -120, 0, -25, 495, 230, 25, M.muro);          // esquina de la casa en x=375 (medido: 135 + 240)
+caja(entorno, -120, 230, -25, 495, 30, 25, M.cadena);
+caja(entorno, -120, 260, -25, 495, 240, 25, M.muroSup);
+caja(entorno, 60, 18, 0, 75, 210, 0.5, M.puerta);            // umbral a 18 (medido)
+caja(entorno, 60, 0, 0, 75, 18, 12, M.cadena);              // escalón 18 medido
+caja(entorno, 135, 350, 0, 135, 98, 0.5, M.canal);           // ventana 2º piso: 135–270, alféizar 350, alto 98 (medido)
+caja(entorno, -18, 0, 0, 10, 160, 560, M.vecino);           // muralla vecino izq.
+caja(entorno, -18, 0, 560, 500, 160, 10, M.vecino);         // muralla otro vecino
+const tubo = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 500, 16), M.sofito);
+tubo.position.set(361, 250, 8); entorno.add(tubo);
+caja(entorno, 325, 280, 0, 25, 18, 8, M.perno);             // foco
+etiqueta(entorno, 'E ☀ mañana (frente)', 175, 5, 470, true);
+etiqueta(entorno, 'N (costado portón)', 460, 5, 150, true);
+etiqueta(entorno, 'S (costado mesa · luz difusa)', -60, 5, 150, true);
+// muro norte de la casa (costado de los autos), desde la esquina (x=375) hacia el interior de la casa (z<0)
+caja(entorno, 355, 0, -520, 20, 230, 495, M.muro);
+caja(entorno, 355, 230, -520, 20, 30, 495, M.cadena);
+caja(entorno, 355, 260, -520, 20, 240, 495, M.muroSup);
+caja(entorno, 375, -2, -520, 420, 2, 520, M.radier);                        // radier del costado (autos)
+caja(entorno, 375.2, 110, -90, .5, 75, 70, M.canal);                       // ventana baño
+caja(entorno, 375.2, 100, -255, .5, 115, 80, M.canal);                     // ventana cocina
+caja(entorno, 375.2, 0, -335, .5, 210, 80, M.puerta);                      // puerta con reja
+caja(entorno, 375, 120, -175, 18, 80, 60, M.metal);                        // caja del calefón
+const chim = new THREE.Mesh(new THREE.CylinderGeometry(5, 5, 300, 12), M.metal);
+chim.position.set(385, 350, -145); entorno.add(chim);                       // chimenea del calefón
+caja(entorno, 376, 55, -192, 6, 8, 6, M.diagonal);                         // llave de agua (manilla roja)
+const tg = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 90, 12), M.vecino);
+tg.position.set(380, 45, -245); entorno.add(tg);                            // tubo gris de desagüe existente
+caja(entorno, 378, -1, -270, 40, 2, 40, M.perno);                          // sumidero
+const autos = new THREE.MeshStandardMaterial({ color: 0x4a7fb5, transparent: true, opacity: .15 });
+caja(entorno, 420, 0, -480, 340, 1, 470, autos);
+etiqueta(entorno, 'Zona de 2 autos (libre al sacar la lavadora)', 590, 10, -250, true);
+etiqueta(entorno, 'Calefón a gas (queda tal cual) · ¿chimenea sobre el catio?', 390, 470, -145, true);
+etiqueta(entorno, 'Llave de agua', 385, 70, -192);
+etiqueta(entorno, 'Desagüe existente (tubo gris + sumidero)', 390, 100, -245);
+etiqueta(entorno, 'Ventana baño', 378, 195, -55);
+
+etiqueta(entorno, 'Cadena 230–260', -60, 245, 2);
+etiqueta(entorno, 'Puerta tapada 75×210', 97, 215, 2);
+etiqueta(entorno, 'Escalón 18 (medido)', 97, 25, 14);
+etiqueta(entorno, 'Ventana 2º piso 135×98 · alféizar 350', 202, 458, 2);
+etiqueta(entorno, 'Bajada aguas lluvias (centro 361)', 361, 320, 8);
+etiqueta(entorno, 'Foco (mover)', 337, 305, 6);
+etiqueta(entorno, 'Radier quebrado (160–170)', 175, 5, 410);
+etiqueta(entorno, 'Canal aguas lluvias', 175, 5, 507);
+etiqueta(entorno, 'Muralla vecino 160 (endeble)', -13, 170, 450);
+etiqueta(entorno, 'Muralla vecino 160 (endeble)', 300, 170, 565);
+
+// ---------- Base: goma, solera, piso ----------
+const base = capa('Base (goma + solera)');
+for (const x of xs) for (const z of zs) caja(base, x - 7.5, 0, z - 7.5, 15, GOMA, 15, M.goma);
+caja(base, 0, GOMA, 6 - PILAR / 2, ANCHO, SOLERA_H, 9, M.maderaOsc);
+caja(base, 0, GOMA, FONDO - 9, ANCHO, SOLERA_H, 9, M.maderaOsc);
+caja(base, 0, GOMA, 6 - PILAR / 2, 9, SOLERA_H, FONDO - 6 + PILAR / 2, M.maderaOsc);
+caja(base, ANCHO - 9, GOMA, 6 - PILAR / 2, 9, SOLERA_H, FONDO - 6 + PILAR / 2, M.maderaOsc);
+etiqueta(base, 'Goma dura 15 mm bajo cada pilar', 345, 2, 300);
+
+// Piso (ADR 0009) — en corte escalonado hacia el frente para ver las capas
+const piso = capa('Piso (capas en corte)');
+const lanaM = mat(0xe8d36a), vinilo = mat(0xf1efe9), terciado = mat(0xe2c48f);
+const Z0 = 12, Z1 = FONDO - 9;                                   // entre soleras
+const xsD = []; for (let x = 12; x <= ANCHO - 16; x += 40) xsD.push(x);
+for (const x of xsD) {
+  caja(piso, x, 0, Z0, 4.5, 1, Z1 - Z0, M.goma);                  // tira de goma
+  caja(piso, x, 1, Z0, 4.5, 6.5, Z1 - Z0, M.maderaOsc);           // durmiente impregnado 2×3 de canto (nivelado con calces)
+}
+for (let i = 0; i < xsD.length - 1; i++)
+  caja(piso, xsD[i] + 4.5, 1, Z0, xsD[i + 1] - xsD[i] - 4.5, 6.5, Z1 - Z0, lanaM);   // lana mineral
+caja(piso, 9, 7.5, Z0, ANCHO - 18, 1.8, Z1 - Z0 - 25, M.osb);      // OSB 18 (corte a 25 del frente)
+caja(piso, 9, 9.3, Z0, ANCHO - 18, 1.2, Z1 - Z0 - 60, terciado);   // terciado 12 (corte a 60)
+caja(piso, 9, 10.5, Z0, ANCHO - 18, .3, Z1 - Z0 - 95, vinilo);     // terminación lisa y clara (corte a 95)
+caja(piso, 290, 10.8, 200, 40, .4, 40, M.perno);                    // registro 40×40 en la pasada del portón (siempre libre)
+caja(piso, 285, 10.8, 12, 62, 4, 62, M.metal);                       // bandeja con desagüe bajo la lavadora
+caja(piso, 290, 14.8, 17, 52, 85, 52, vinilo);                       // lavadora (esquina trasera derecha, colinda con el baño)
+const ped = new THREE.Mesh(new THREE.CylinderGeometry(16, 18, 75, 20), M.maderaOsc);   // pedestal del yunque, al radier
+ped.position.set(175, 37.5, 245); piso.add(ped);
+caja(piso, 161, 75, 237, 28, 10, 16, M.perno);                      // yunque
+// zócalo de fibrocemento con burlete, por fuera del perímetro
+caja(piso, -2, 0, zs[0] - 5, 1, 30, FONDO - zs[0] + 5, M.cadena);
+caja(piso, ANCHO + 1, 0, zs[0] - 5, 1, 30, FONDO - zs[0] + 5, M.cadena);
+const zocaloFrente = caja(piso, 0, 0, FONDO + 1, ANCHO, 30, 1, M.cadena);
+etiqueta(piso, 'Durmientes impregnados c/40 sobre goma', 60, 4, FONDO - 15);
+etiqueta(piso, 'Lana mineral (sin efecto tambor)', 160, 6, FONDO - 15);
+etiqueta(piso, 'OSB 18', 175, 9, FONDO - 34);
+etiqueta(piso, 'Terciado 12', 175, 11, FONDO - 70);
+etiqueta(piso, 'Terminación lisa y clara', 175, 12, FONDO - 105);
+etiqueta(piso, 'Registro 40×40 en la pasada del portón', 310, 14, 220);
+etiqueta(piso, 'Lavadora · bandeja con desagüe + goma antivibración', 316, 105, 43, true);
+etiqueta(piso, 'Yunque sobre pedestal al radier (no toca el piso)', 175, 95, 245, true);
+etiqueta(piso, 'Zócalo fibrocemento + burlete', ANCHO + 2, 32, 200);
+
+// ---------- Esqueleto ----------
+const esq = capa('Esqueleto (pilares + vigas)');
+const vigaZ = z => vigaBottom(z);          // cara superior de vigas perimetrales
+// vigas perimetrales bajo las vigas de techo
+caja(esq, 0, vigaZ(zs[0]) - 14, zs[0] - PILAR / 2, ANCHO, 14, PILAR, M.madera);   // viga trasera
+caja(esq, 0, vigaZ(zs[2]) - 14, zs[2] - PILAR / 2, ANCHO, 14, PILAR, M.madera);   // viga frontal
+for (const x of [xs[0], xs[2]])                                                    // vigas laterales inclinadas
+  pieza(esq, [x, vigaZ(zs[0]) - 7, zs[0] - PILAR / 2], [x, vigaZ(zs[2]) - 7, zs[2] + PILAR / 2], PILAR, 14, M.madera);
+for (const x of xs) for (const z of zs) {
+  if (x === xs[1] && z === zs[1]) continue;   // sin pilar al centro
+  const top = vigaZ(z) - 14;
+  caja(esq, x - PILAR / 2, BASE, z - PILAR / 2, PILAR, top - BASE, PILAR, M.madera);
+}
+etiqueta(esq, `Frente: libre ≈ ${Math.round(vigaZ(zs[2]) - 14 - BASE - 1.8)} cm`, 175, 150, 300);
+
+// Viga de apoyo en la cadena + pernos
+const apoyo = capa('Viga de apoyo en cadena');
+caja(apoyo, 0, 236, 0, ANCHO, 19, 4.5, M.maderaOsc);   // fija en la cadena; amarre horizontal de los pilares traseros
+for (let x = 30; x < ANCHO; x += 72) {
+  const p = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 8, 8), M.perno);
+  p.rotation.x = Math.PI / 2; p.position.set(x, 245, 4.5); apoyo.add(p);
+}
+etiqueta(apoyo, 'Viga de apoyo = amarre horizontal · pernos a 250 · ojo fierro', 175, 262, 4);
+etiqueta(apoyo, 'Cielo 238: punto BAJO junto a la puerta (dintel 228)', 97, 241, 20, true);
+
+// Diagonales: izq., der., frente (2 vanos c/u) y trasera solo vano derecho (la puerta ocupa el izquierdo)
+const diag = capa('Diagonales');
+const topZ = z => vigaZ(z) - 14;
+const TRAV = 165;   // travesaño bajo la franja de ventanas altas (170)
+pieza(diag, [xs[2], BASE + 10, zs[0]], [xs[2], topZ(zs[1]) - 5, zs[1]], 4.5, 9, M.diagonal);
+pieza(diag, [xs[0], BASE + 10, zs[0]], [xs[0], TRAV - 5, zs[1]], 4.5, 9, M.diagonal);
+pieza(diag, [xs[0], BASE + 10, zs[2]], [xs[0], TRAV - 5, zs[1]], 4.5, 9, M.diagonal);
+caja(diag, xs[0] - 2.25, TRAV, zs[0], 4.5, 9, FONDO - zs[0], M.madera);        // travesaño costado izq.
+caja(diag, 0, TRAV, zs[2] - 2.25, ANCHO, 9, 4.5, M.madera);                    // travesaño frente
+etiqueta(diag, 'Vano del portón: sin diagonal → rigidizar', ANCHO + 4, 120, 222, true);
+pieza(diag, [xs[2], BASE + 10, zs[2]], [xs[1], TRAV - 5, zs[2]], 4.5, 9, M.diagonal);   // vano izq. del frente: ventana, sin diagonal
+pieza(diag, [xs[2], BASE + 10, zs[0]], [xs[1], topZ(zs[0]) - 5, zs[0]], 4.5, 9, M.diagonal);
+etiqueta(diag, 'Sin diagonal: vano de la puerta', 97, 120, 8, true);
+
+// Portón corredizo colgante (ADR 0005): costado derecho, abre el vano frontal y corre hacia el muro
+const porton = capa('Portón corredizo (ADR 0005)');
+caja(porton, ANCHO + 3, BASE + 2, zs[1] + 6, 4, 200, 140, M.panel);
+caja(porton, ANCHO + 2, BASE + 205, zs[0], 6, 5, FONDO - zs[0], M.metal);   // riel superior
+etiqueta(porton, 'Portón colgante · riel A NIVEL · retén abierto/cerrado', ANCHO + 8, 150, 225);
+
+// Ventanas
+const ventanas = capa('Ventanas y extracción');
+const vidrio = new THREE.MeshStandardMaterial({ color: 0x7fb3d5, transparent: true, opacity: .5 });
+caja(ventanas, -3, 172, 12, 2, 66, FONDO - 20, vidrio);                                 // franja alta costado izq. (hasta el cielo, 238)                 // franja alta costado izq.
+caja(ventanas, 6, 172, FONDO + 1, ANCHO - 12, 77, 2, vidrio);                            // franja alta frente 172–249            // franja alta frente
+caja(ventanas, 25, 90, FONDO + 1, 125, 70, 2, vidrio);                                  // ventana normal frente izq.
+caja(ventanas, 10, 178, FONDO + 3, 30, 30, 12, M.metal);                                // extractor (idea)
+{ // zona caliente (fundición): planta de esquina con la punta interior cortada (chaflán) para pararse de frente a la esquina
+  const f = new THREE.Shape([[6, 294], [106, 294], [106, 250], [56, 200], [6, 200]].map(([x, z]) => new THREE.Vector2(x, -z)));
+  const m = new THREE.Mesh(new THREE.ExtrudeGeometry(f, { depth: 60, bevelEnabled: false }), M.quebrado);
+  m.rotation.x = -Math.PI / 2; m.position.y = 11; m.castShadow = m.receiveShadow = true; ventanas.add(m);
+  const pie = new THREE.Mesh(new THREE.CylinderGeometry(22, 22, .6, 24), new THREE.MeshStandardMaterial({ color: 0x2e9e5b, transparent: true, opacity: .45 }));
+  pie.position.set(98, 11.8, 192); ventanas.add(pie);                                       // donde se para el usuario
+  etiqueta(ventanas, 'Aquí te paras, mirando a la esquina', 98, 20, 185);
+}
+etiqueta(ventanas, 'Franja alta sobre muralla vecino', -4, 200, 150);
+etiqueta(ventanas, 'Franja alta frente', 260, 200, FONDO + 2);
+etiqueta(ventanas, 'Ventana frente', 87, 125, FONDO + 2);
+etiqueta(ventanas, 'Extracción', 25, 215, FONDO + 8, true);
+etiqueta(ventanas, 'Fundición en esquina con chaflán · plataforma reforzada', 50, 80, FONDO - 40, true);
+etiqueta(ventanas, 'Travesaño a 170', 175, 168, FONDO + 3);
+
+// Cielo interior con pendiente invertida: bajo junto al muro (238), alto en el frente (249 = tope de ventanas altas)
+const cielo = capa('Cielo interior (pendiente invertida)');
+const matCielo = new THREE.MeshStandardMaterial({ color: 0xf2efe6, transparent: true, opacity: .55, side: THREE.DoubleSide });
+pieza(cielo, [ANCHO / 2, 238, zs[0]], [ANCHO / 2, 249, FONDO - 2], ANCHO, 1.2, matCielo);
+for (const x of [80, 175, 270])
+  cielo.add(new THREE.ArrowHelper(new THREE.Vector3(0, 11, 280).normalize(), new THREE.Vector3(x, 232, 40), 230, 0xd62728, 18, 10));
+etiqueta(cielo, 'Cielo 238 → 249: el aire caliente sube hacia las ventanas altas', 175, 225, 150, true);
+etiqueta(cielo, 'Sobre la fundición: fibrocemento o volcanita RF', 56, 236, FONDO - 50);
+etiqueta(cielo, 'Cámara: aislación + ductos', 300, 262, 150);
+
+// Interior (propuesta de distribución)
+const interior = capa('Interior (propuesta)');
+const pasada = new THREE.MeshStandardMaterial({ color: 0x2e9e5b, transparent: true, opacity: .35 });
+const golpe = new THREE.MeshStandardMaterial({ color: 0xd62728, transparent: true, opacity: .18 });
+caja(interior, 9, 11, 70, 50, 77, 110, M.madera);                  // mesa de joyero (cuerpo)
+caja(interior, 7, 88, 68, 54, 4, 114, M.maderaOsc);                 // cubierta a 92
+caja(interior, 222, 11, 12, 56, 70, 56, M.metal);                   // banco del laminador (muro de la casa, a la izq. de la lavadora)
+caja(interior, 230, 81, 20, 40, 32, 40, M.perno);                   // laminador
+pieza(interior, [250, 100, 60], [250, 100, 88], 3, 3, M.perno);     // manivela hacia el frente (dejar ~50 cm libres)
+pieza(interior, [97, 11.5, 30], [322, 11.5, 222], 80, .5, pasada);  // pasada puerta casa → portón
+caja(interior, 58, 11.4, 9, 80, .5, 80, pasada);                    // barrido de la puerta
+const disco = new THREE.Mesh(new THREE.CylinderGeometry(60, 60, .6, 32), golpe);
+disco.position.set(175, 11.8, 245); interior.add(disco);            // espacio de trabajo del yunque
+etiqueta(interior, 'Mesa de joyero 110×50 · luz desde la izquierda (ventana frente)', 34, 100, 125, true);
+etiqueta(interior, 'Laminador junto a la lavadora · manivela hacia el frente', 250, 125, 40, true);
+etiqueta(interior, 'Pasada casa → portón (80 cm)', 210, 14, 130);
+etiqueta(interior, 'Espacio del yunque Ø120', 175, 14, 290);
+etiqueta(interior, 'Barrido de la puerta', 97, 14, 50);
+
+// Agua y desagüe de la lavadora: por fuera, pegados al muro norte, en canaleta (CONTEXT.md)
+const servicios = capa('Agua y desagüe lavadora');
+const agua = new THREE.MeshStandardMaterial({ color: 0x1f6fd1 }), des = new THREE.MeshStandardMaterial({ color: 0x777777 });
+const tramo = (pts, r, m) => { for (let i = 0; i < pts.length - 1; i++) pieza(servicios, pts[i], pts[i + 1], r, r, m); };
+tramo([[380, 60, -192], [380, 60, 0], [380, 60, 30], [350, 60, 30], [320, 60, 38]], 2, agua);
+tramo([[380, 89, -245], [380, 91, -150], [380, 93, 0], [380, 94, 30], [350, 95, 30], [318, 95, 38]], 4, des);
+caja(servicios, 382, 50, -250, 8, 55, 280, autos);                          // canaleta de protección (tramo de autos)
+etiqueta(servicios, 'Agua: extensión desde la llave existente', 384, 52, -90);
+etiqueta(servicios, 'Desagüe: pendiente 2–4 % hacia el tubo gris, llega por arriba sin sellar', 384, 110, -120, true);
+
+// Paneles de muro (translúcidos)
+const paneles = capa('Paneles de muro', false);
+caja(paneles, -1.8, BASE, zs[0] - PILAR / 2, 1.8, topZ(zs[2]) - BASE + 14, FONDO - zs[0] + PILAR / 2, M.panel);
+caja(paneles, ANCHO, BASE, zs[0] - PILAR / 2, 1.8, topZ(zs[2]) - BASE + 14, FONDO - zs[0] + PILAR / 2, M.panel);
+caja(paneles, 0, BASE, FONDO, ANCHO, topZ(zs[2]) - BASE + 14, 1.8, M.panel);
+
+// ---------- Techo (depende de la variante) ----------
+const techo = capa('Techo');
+const viento = capa('Viento (succión relativa)');
+const malla = capa('Techo de las gatas (catio cerrado)');
+
+function construirTecho(v) {
+  for (const g of [techo, viento, malla]) while (g.children.length) g.remove(g.children[0]);
+  const zFin = FONDO + v.alero;
+  const AT = ANCHO_TECHO;                  // el techo llega a la esquina de la casa (ADR 0003)
+  // vigas de techo cada ~58 cm + una extra en el alero lateral, del muro al final del alero
+  for (let i = 0; i <= 6; i++) {
+    const x = Math.min(Math.max(i * ANCHO / 6, 2.25), ANCHO - 2.25);
+    pieza(techo, [x, techoTop(0) - 7, 0], [x, techoTop(zFin) - 7, zFin], 4.5, VIGA_TECHO_H, M.madera);
+  }
+  pieza(techo, [AT - 2.25, techoTop(0) - 7, 0], [AT - 2.25, techoTop(zFin) - 7, zFin], 4.5, VIGA_TECHO_H, M.madera);
+  // cubierta OSB
+  pieza(techo, [AT / 2, techoTop(0) + .9, 0], [AT / 2, techoTop(zFin) + .9, zFin], AT, 1.8, M.osb);
+  // tapacán frontal y lateral
+  caja(techo, 0, techoTop(zFin) - VIGA_TECHO_H, zFin, AT, VIGA_TECHO_H + 2, 2, M.maderaOsc);
+  pieza(techo, [AT + 1, techoTop(0) - 6, 0], [AT + 1, techoTop(zFin) - 6, zFin], 2, VIGA_TECHO_H + 2, M.maderaOsc);
+  // parapeto en muro y costados (el frente queda libre para que salga el agua)
+  const P = 20;
+  caja(techo, 0, techoTop(0) + 1.8, 0, AT, P, 4.5, M.maderaOsc);
+  for (const x of [0, AT - 4.5])
+    pieza(techo, [x + 2.25, techoTop(0) + 1.8 + P / 2, 0], [x + 2.25, techoTop(zFin) + 1.8 + P / 2, zFin], 4.5, P, M.maderaOsc);
+  // canaleta frontal
+  caja(techo, 0, techoTop(zFin) - 12, zFin + 2, AT, 10, 12, M.metal);
+  etiqueta(techo, 'Canaleta frontal', 60, techoTop(zFin) - 20, zFin + 8);
+  // bajada de la casa: se corta y con un codo viaja bajo el alero lateral hasta el frente (ADR 0003)
+  const yC = techoTop(0) - 8;
+  tubo.geometry.dispose();
+  tubo.geometry = new THREE.CylinderGeometry(4, 4, 500 - yC, 16);
+  tubo.position.set(361, (500 + yC) / 2, 8);
+  pieza(techo, [361, yC, 8], [361, techoTop(zFin) - 8, zFin + 6], 8, 8, M.sofito);
+  for (let y = techoTop(zFin) - 14; y > 2; y -= 6) {
+    const e = new THREE.Mesh(new THREE.TorusGeometry(2.5, .6, 6, 12), M.metal);
+    e.position.set(361, y, zFin + 8); e.rotation.y = (y % 12 < 6) ? 0 : Math.PI / 2; techo.add(e);
+  }
+  caja(techo, 341, 0, zFin - 12, 40, 4, 40, M.quebrado);
+  etiqueta(techo, 'Cadena de lluvia → pozo de grava → canal', 361, 60, zFin + 8, true);
+  etiqueta(techo, 'Bajada bajo el alero lateral (1 codo)', 361, yC - 15, 150);
+  // sofitos: frontal y lateral derecho
+  pieza(techo, [AT / 2, vigaBottom(FONDO) - .5, FONDO], [AT / 2, vigaBottom(zFin) - .5, zFin], AT, 1, M.sofito);
+  pieza(techo, [(ANCHO + AT) / 2, vigaBottom(0) - .5, 0], [(ANCHO + AT) / 2, vigaBottom(FONDO) - .5, FONDO], AT - ANCHO, 1, M.sofito);
+  etiqueta(techo, 'Sofito (cierra bajo el alero)', 175, vigaBottom(zFin) - 12, zFin - 15);
+  etiqueta(techo, `Alero frontal ${v.alero} cm`, -20, techoTop(zFin) + 10, FONDO + v.alero / 2);
+  etiqueta(techo, 'Alero lateral 25 cm (hasta la esquina)', AT, techoTop(60) + 25, 60);
+  etiqueta(techo, 'Parapeto 20 cm (base malla gatos)', 175, techoTop(0) + 30, 10);
+  // viento
+  const rojo = 0xd62728;
+  viento.add(new THREE.ArrowHelper(new THREE.Vector3(0, 0, -1), new THREE.Vector3(175, vigaBottom(FONDO) - 25, zFin + 150), 140, rojo, 25, 14));
+  viento.add(new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(175, techoTop(zFin) + 5, FONDO + v.alero / 2), v.succion * 1.6, rojo, 22, 14));
+  etiqueta(viento, `Succión relativa: ${v.succion}/100`, 175, techoTop(zFin) + v.succion * 1.6 + 20, FONDO, true);
+  // techo de las gatas: catio cerrado de 220 de fondo (3 vanos de 110 menos 1) y 180 de alto (2 corridas de 90)
+  const AT2 = ANCHO_TECHO, ZC = 220, HC = 180, yP = z => techoTop(z) + 1.8 + 20;   // tope del parapeto
+  for (const x of [0, AT2])
+    pieza(malla, [x, yP(0) + HC / 2, 0], [x, yP(ZC) + HC / 2, ZC], 1, HC, M.malla);
+  caja(malla, 0, yP(ZC) - 20, ZC, AT2, HC + 20, 1, M.malla);                     // frente del catio (sobre el techo)
+  pieza(malla, [AT2 / 2, yP(0) + HC, 0], [AT2 / 2, yP(ZC) + HC, ZC], AT2, 1, M.malla);   // techo de malla
+  for (const x of [0, AT2]) for (const z of [0, 110, ZC - 4])
+    caja(malla, x - 2, yP(z) - 20, z, 4, HC + 20, 4, M.maderaOsc);
+  for (let x = 110; x < AT2; x += 110) caja(malla, x - 2, yP(ZC) - 20, ZC - 4, 4, HC + 20, 4, M.maderaOsc);
+  caja(malla, 150, yP(ZC) - 20, ZC - 2, 70, HC, 3, M.panel);                     // puerta de malla para entrar a limpiar
+  etiqueta(malla, `Catio cerrado 375 × ${ZC} · ${HC + 20} libres · ~27 m de malla`, 0, yP(110) + HC + 20, 110);
+  etiqueta(malla, 'Puerta de malla (entrar a limpiar)', 185, yP(ZC) + 60, ZC + 2, true);
+  etiqueta(malla, 'Franja libre 110 cm hasta la canaleta', 175, techoTop(280) + 10, 290);
+  // escalera bajo la ventana (alféizar 350): repisa + 3 peldaños de ~23 cm hasta el techo
+  for (let i = 0; i < 3; i++) {
+    const top = 348 - 19 * i, z0 = i * 30;
+    caja(malla, 140, techoTop(z0 + 30) + 1.8, z0, 60, top - techoTop(z0 + 30) - 1.8, 30, i === 0 ? M.maderaOsc : M.madera);
+  }
+  // rincón con sombra contra el muro
+  caja(malla, 285, techoTop(60) + 1.8, 0, 80, 55, 60, M.vecino);
+  caja(malla, 280, techoTop(60) + 57, 0, 90, 3, 66, M.maderaOsc);
+  etiqueta(malla, 'Repisa + 2 peldaños de ~19 (lado izq., donde abre la ventana)', 170, 360, 60, true);
+  etiqueta(malla, 'Rincón con sombra', 325, techoTop(30) + 70, 30);
+}
+
+// ---------- Conmutador de variantes ----------
+let idx = Math.max(0, VARIANTES.findIndex(v => v.key === new URLSearchParams(location.search).get('variant')));
+function aplicar() {
+  const v = VARIANTES[idx];
+  construirTecho(v);
+  document.getElementById('pillLabel').textContent = `${v.key} — ${v.nombre}`;
+  document.getElementById('variantInfo').innerHTML =
+    `<b>${v.key} — ${v.nombre}</b><ul>${v.pros.map(p => `<li class="pro">${p}</li>`).join('')}${v.contras.map(c => `<li class="contra">${c}</li>`).join('')}</ul>`;
+  const u = new URL(location.href); u.searchParams.set('variant', v.key); history.replaceState(null, '', u);
+}
+const mover = d => { idx = (idx + d + VARIANTES.length) % VARIANTES.length; aplicar(); };
+document.getElementById('prev').onclick = () => mover(-1);
+document.getElementById('next').onclick = () => mover(1);
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'ArrowLeft') mover(-1);
+  if (e.key === 'ArrowRight') mover(1);
+});
+aplicar();
+
+// ---------- Vistas ----------
+function setCapas(on) {
+  for (const [n, g] of Object.entries(capas)) {
+    g.visible = on.includes(n);
+    const cb = [...document.querySelectorAll('#layers label')].find(l => l.textContent.trim() === n)?.querySelector('input');
+    if (cb) cb.checked = g.visible;
+  }
+}
+function vista(nombre) {
+  if (nombre !== 'piso') zocaloFrente.visible = true;
+  if (nombre === 'cielo') {
+    setCapas(['Esqueleto (pilares + vigas)', 'Viga de apoyo en cadena', 'Ventanas y extracción', 'Cielo interior (pendiente invertida)', 'Base (goma + solera)', 'Piso (capas en corte)']);
+    camera.position.set(1150, 260, 150); controls.target.set(175, 190, 150);
+  } else if (nombre === 'norte') {
+    setCapas(['Casa y entorno', 'Base (goma + solera)', 'Esqueleto (pilares + vigas)', 'Agua y desagüe lavadora', 'Interior (propuesta)', 'Portón corredizo (ADR 0005)', 'Techo']);
+    camera.position.set(820, 260, -330); controls.target.set(360, 90, -80);
+  } else if (nombre === 'piso') {
+    setCapas(['Base (goma + solera)', 'Piso (capas en corte)', 'Esqueleto (pilares + vigas)', 'Ventanas y extracción', 'Interior (propuesta)']);
+    zocaloFrente.visible = false;   // se oculta para ver el corte
+    camera.position.set(640, 300, 760); controls.target.set(175, 0, 160);
+  } else {
+    zocaloFrente.visible = true;
+    setCapas(Object.keys(capas).filter(n => n !== 'Paneles de muro'));
+    camera.position.set(720, 480, 980); controls.target.set(175, 120, 180);
+  }
+  controls.update();
+  const u = new URL(location.href); u.searchParams.set('vista', nombre); history.replaceState(null, '', u);
+}
+document.getElementById('vGeneral').onclick = () => vista('general');
+document.getElementById('vCielo').onclick = () => vista('cielo');
+document.getElementById('vPiso').onclick = () => vista('piso');
+document.getElementById('vNorte').onclick = () => vista('norte');
+{ const v = new URLSearchParams(location.search).get('vista'); if (['cielo', 'piso', 'norte'].includes(v)) vista(v); }
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight); labelRenderer.setSize(innerWidth, innerHeight);
+});
+// las etiquetas siguen la visibilidad de su capa
+function syncEtiquetas() {
+  scene.traverse(o => {
+    if (!o.isCSS2DObject) return;
+    let v = true; for (let p = o.parent; p; p = p.parent) if (!p.visible) { v = false; break; }
+    o.visible = v;
+  });
+}
+renderer.setAnimationLoop(() => { controls.update(); syncEtiquetas(); renderer.render(scene, camera); labelRenderer.render(scene, camera); });
+</script>
+</body>
+</html>
