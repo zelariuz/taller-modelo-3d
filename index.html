@@ -7,21 +7,28 @@
 <title>Taller — prototipo 3D</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; font-family: system-ui, sans-serif; background: #dfe6ec; }
-  #panel { position: fixed; top: 12px; left: 12px; width: 300px; max-height: calc(100% - 100px); overflow: auto;
+  #panel { position: fixed; z-index: 10; top: 12px; left: 12px; width: 300px; max-height: calc(100% - 100px); overflow: auto;
     background: rgba(255,255,255,.93); border-radius: 10px; padding: 12px 14px; font-size: 13px; line-height: 1.4;
     box-shadow: 0 2px 10px rgba(0,0,0,.15); }
   #panel h1 { font-size: 15px; margin: 0 0 4px; }
   #panel h2 { font-size: 13px; margin: 12px 0 4px; }
+  #panel details { border-top: 1px solid #ddd; padding: 6px 0; }
+  #panel summary { font-weight: 600; cursor: pointer; }
+  #panel table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 4px; }
+  #panel td { border-top: 1px solid #eee; padding: 3px 2px; vertical-align: top; }
+  .ok { color: #1a7f37; } .falla { color: #b42318; font-weight: 600; }
+  .espec { color: #555; font-size: 11px; }
   #panel ul { margin: 4px 0; padding-left: 18px; }
   #panel label { display: block; cursor: pointer; }
   .pro { color: #1a7f37; } .contra { color: #b42318; }
   .tag { font-size: 11px; color: #666; }
-  #pill { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px;
+  #pill { position: fixed; z-index: 10; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px;
     background: #222; color: #fff; border-radius: 999px; padding: 6px 10px; font-size: 14px; box-shadow: 0 2px 10px rgba(0,0,0,.3); }
   #pill button { background: #444; color: #fff; border: 0; border-radius: 999px; width: 30px; height: 30px; font-size: 16px; cursor: pointer; }
   .lbl { background: rgba(0,0,0,.72); color: #fff; font-size: 11px; padding: 2px 6px; border-radius: 4px; white-space: nowrap; }
   .lbl.duda { background: #b42318; }
 </style>
+<script src="modelo/modelo-taller.js"></script>
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
@@ -33,13 +40,15 @@
 <div id="panel">
   <h1>Taller — prototipo 3D</h1>
   <div class="tag">Desechable · 350 × 300 cm · medidas en cm · arrastra para rotar, rueda para zoom</div>
-  <h2>Techo</h2>
-  <div id="variantInfo"></div>
-  <h2>Vistas</h2>
+  <details open><summary>Vistas</summary>
   <div><button id="vGeneral">General</button> <button id="vCielo">Corte: cielo y vapores</button> <button id="vPiso">Piso e interior</button> <button id="vNorte">Costado norte (lavadora)</button></div>
-  <h2>Capas</h2>
-  <div id="layers"></div>
-  <h2>Decidido (ADR)</h2>
+  </details>
+  <details open><summary>Capas</summary><div id="layers"></div></details>
+  <details><summary>Techo (alero)</summary><div id="variantInfo"></div></details>
+  <details open><summary>Verificaciones</summary><ul id="verificaciones"></ul></details>
+  <details><summary>Piezas</summary><table id="piezas"></table></details>
+  <details><summary>Opciones</summary><div id="opciones"></div></details>
+  <details><summary>Decidido (ADR)</summary>
   <ul>
     <li>0001: sin perforar el radier; estabilidad con la cadena, diagonales, lastre útil y goma dura</li>
     <li>0002: esqueleto de 8 pilares + paneles atornillados</li>
@@ -52,13 +61,15 @@
     <li>0009: piso rígido, silencioso y sellado; yunque en pedestal</li>
     <li>0010: muros: lata prepintada + cámara + lana + OSB interior</li>
   </ul>
-  <h2>Pendiente</h2>
+  </details>
+  <details><summary>Pendiente</summary>
   <ul>
     <li>Cámaras de inspección / desagüe del baño</li>
     <li>Cubierta impermeable y antideslizante del techo</li>
     <li>Interior: lavadora, banco, zona caliente</li>
     <li>Electricidad (al final)</li>
   </ul>
+  </details>
 </div>
 <div id="pill"><button id="prev">←</button><span id="pillLabel"></span><button id="next">→</button></div>
 
@@ -94,7 +105,7 @@ renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 const labelRenderer = new CSS2DRenderer();
 labelRenderer.setSize(innerWidth, innerHeight);
-Object.assign(labelRenderer.domElement.style, { position: 'absolute', top: '0', pointerEvents: 'none' });
+Object.assign(labelRenderer.domElement.style, { position: 'absolute', top: '0', pointerEvents: 'none', zIndex: '1' });
 document.body.appendChild(labelRenderer.domElement);
 
 const scene = new THREE.Scene();
@@ -211,11 +222,6 @@ etiqueta(entorno, 'Muralla vecino 160 (endeble)', 300, 170, 565);
 
 // ---------- Base: goma, solera, piso ----------
 const base = capa('Base (goma + solera)');
-for (const x of xs) for (const z of zs) caja(base, x - 7.5, 0, z - 7.5, 15, GOMA, 15, M.goma);
-caja(base, 0, GOMA, 6 - PILAR / 2, ANCHO, SOLERA_H, 9, M.maderaOsc);
-caja(base, 0, GOMA, FONDO - 9, ANCHO, SOLERA_H, 9, M.maderaOsc);
-caja(base, 0, GOMA, 6 - PILAR / 2, 9, SOLERA_H, FONDO - 6 + PILAR / 2, M.maderaOsc);
-caja(base, ANCHO - 9, GOMA, 6 - PILAR / 2, 9, SOLERA_H, FONDO - 6 + PILAR / 2, M.maderaOsc);
 etiqueta(base, 'Goma dura 15 mm bajo cada pilar', 345, 2, 300);
 
 // Piso (ADR 0009) — en corte escalonado hacia el frente para ver las capas
@@ -255,27 +261,45 @@ etiqueta(piso, 'Zócalo fibrocemento + burlete', ANCHO + 2, 32, 200);
 // ---------- Esqueleto ----------
 const esq = capa('Esqueleto (pilares + vigas)');
 const vigaZ = z => vigaBottom(z);          // cara superior de vigas perimetrales
-// vigas perimetrales bajo las vigas de techo
-caja(esq, 0, vigaZ(zs[0]) - 14, zs[0] - PILAR / 2, ANCHO, 14, PILAR, M.madera);   // viga trasera
-caja(esq, 0, vigaZ(zs[2]) - 14, zs[2] - PILAR / 2, ANCHO, 14, PILAR, M.madera);   // viga frontal
-for (const x of [xs[0], xs[2]])                                                    // vigas laterales inclinadas
-  pieza(esq, [x, vigaZ(zs[0]) - 7, zs[0] - PILAR / 2], [x, vigaZ(zs[2]) - 7, zs[2] + PILAR / 2], PILAR, 14, M.madera);
-for (const x of xs) for (const z of zs) {
-  if (x === xs[1] && z === zs[1]) continue;   // sin pilar al centro
-  const top = vigaZ(z) - 14;
-  caja(esq, x - PILAR / 2, BASE, z - PILAR / 2, PILAR, top - BASE, PILAR, M.madera);
-}
+// base, esqueleto y viga de apoyo: se dibujan desde el modelo (ver más abajo)
 etiqueta(esq, `Frente: libre ≈ ${Math.round(vigaZ(zs[2]) - 14 - BASE - 1.8)} cm`, 175, 150, 300);
 
-// Viga de apoyo en la cadena + pernos
+// Viga de apoyo en la cadena (viga y pernos se dibujan desde el modelo)
 const apoyo = capa('Viga de apoyo en cadena');
-caja(apoyo, 0, 236, 0, ANCHO, 19, 4.5, M.maderaOsc);   // fija en la cadena; amarre horizontal de los pilares traseros
-for (let x = 30; x < ANCHO; x += 72) {
-  const p = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 8, 8), M.perno);
-  p.rotation.x = Math.PI / 2; p.position.set(x, 245, 4.5); apoyo.add(p);
-}
 etiqueta(apoyo, 'Viga de apoyo = amarre horizontal · pernos a 250 · ojo fierro', 175, 262, 4);
 etiqueta(apoyo, 'Cielo 238: punto BAJO junto a la puerta (dintel 228)', 97, 241, 20, true);
+
+// ---------- Desde el modelo del taller (fuente de verdad de medidas) ----------
+const { modeloTaller } = window.ModeloTaller;
+const modelo = modeloTaller();
+for (const e of modelo.geometria) {
+  const g = capas[e.capa], m = M[e.material];
+  if (e.tipo === 'caja') caja(g, ...e.min, ...e.tam, m);
+  else if (e.tipo === 'pieza') pieza(g, e.a, e.b, e.seccion[0], e.seccion[1], m);
+  else if (e.tipo === 'cilindro') {
+    const c = new THREE.Mesh(new THREE.CylinderGeometry(e.radio, e.radio, e.largo, 8), m);
+    if (e.eje === 'z') c.rotation.x = Math.PI / 2; else if (e.eje === 'x') c.rotation.z = Math.PI / 2;
+    c.position.set(...e.centro); g.add(c);
+  }
+}
+
+// Secciones del panel: verificaciones, piezas y opciones (la selección cambia especificaciones, no la geometría)
+const seleccion = {};
+function mostrarModelo() {
+  const m = modeloTaller({}, seleccion);
+  document.getElementById('verificaciones').innerHTML = m.verificaciones.map(v =>
+    `<li class="${v.estado}">${v.estado === 'ok' ? '✓' : '✗'} ${v.explicacion} <span class="espec">(${v.protege})</span></li>`).join('');
+  const largo = l => l == null ? '' : `${l.toFixed(2).replace('.', ',')} m`;
+  document.getElementById('piezas').innerHTML = m.piezas.map(p =>
+    `<tr><td><b>${p.elemento}</b><div class="espec">${p.escuadria} · ${p.especificacion}</div></td><td>${p.cantidad}</td><td>${largo(p.largo)}</td></tr>`).join('');
+  document.getElementById('opciones').innerHTML = m.opciones.map(o =>
+    `<h2>${o.titulo}</h2>` + o.alternativas.map(a => `<label><input type="radio" name="op-${o.id}" value="${a.id}" ${a.id === o.elegida ? 'checked' : ''}>
+      <b>${a.id}: ${a.nombre}</b>${a.recomendada ? ' (recomendada)' : ''}
+      <div class="espec"><span class="pro">+ ${a.ventajas}</span><br><span class="contra">− ${a.desventajas}</span></div></label>`).join('')).join('');
+  for (const r of document.querySelectorAll('#opciones input'))
+    r.onchange = () => { seleccion[r.name.slice(3)] = r.value; mostrarModelo(); };
+}
+mostrarModelo();
 
 // Diagonales: izq., der., frente (2 vanos c/u) y trasera solo vano derecho (la puerta ocupa el izquierdo)
 const diag = capa('Diagonales');
