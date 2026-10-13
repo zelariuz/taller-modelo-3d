@@ -27,7 +27,18 @@
   #pill button { background: #444; color: #fff; border: 0; border-radius: 999px; width: 30px; height: 30px; font-size: 16px; cursor: pointer; }
   .lbl { background: rgba(0,0,0,.72); color: #fff; font-size: 11px; padding: 2px 6px; border-radius: 4px; white-space: nowrap; }
   .lbl.duda { background: #b42318; }
-  #barra { display: none; }
+  #tip { position: fixed; z-index: 12; pointer-events: none; background: rgba(20,20,20,.92); color: #fff; font-size: 12px;
+    padding: 6px 9px; border-radius: 6px; max-width: 280px; line-height: 1.35; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+  #tip .espec { color: #bbb; font-size: 11px; }
+  /* escritorio: solo el botón Etiquetas, arriba a la derecha (el panel ocupa la izquierda) */
+  #barra { position: fixed; z-index: 11; top: 12px; right: 12px; }
+  #barra #bPanel { display: none; }
+  #barra button { background: #222; color: #fff; border: 0; border-radius: 999px; padding: 8px 14px; font-size: 13px; cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+  #barra #bEtiquetas.on { background: #1f4fd1; }
+  #desarme { position: fixed; z-index: 10; right: 12px; bottom: 18px; display: flex; align-items: center; gap: 8px;
+    background: rgba(255,255,255,.95); border-radius: 999px; padding: 8px 14px; box-shadow: 0 2px 10px rgba(0,0,0,.18); font-size: 13px; }
+  #desarme input { width: 160px; }
   /* celular: el panel es una hoja inferior que se abre con un botón; botones más grandes para el dedo */
   @media (max-width: 700px) {
     #panel { top: auto; bottom: 0; left: 0; right: 0; width: auto; max-height: 60vh; border-radius: 14px 14px 0 0;
@@ -39,9 +50,11 @@
     #panel input[type=checkbox], #panel input[type=radio] { width: 18px; height: 18px; vertical-align: middle; }
     #panel label { padding: 3px 0; }
     #pill { display: none; }
-    #barra { display: flex; position: fixed; z-index: 11; top: 10px; left: 10px; right: 10px; gap: 8px; justify-content: space-between; }
-    #barra button { background: #222; color: #fff; border: 0; border-radius: 999px; padding: 10px 14px; font-size: 14px;
-      box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+    #desarme { left: 50%; right: auto; transform: translateX(-50%); bottom: 14px; }
+    #desarme input { width: 150px; }
+    #barra { display: flex; top: 10px; left: 10px; right: 10px; gap: 8px; justify-content: space-between; }
+    #barra #bPanel { display: inline-block; }
+    #barra button { padding: 10px 14px; font-size: 14px; }
     body.panel-abierto #barra #bPanel { background: #1f4fd1; }
     .lbl { font-size: 10px; }
   }
@@ -55,6 +68,7 @@
 </script>
 </head>
 <body>
+<div id="tip" hidden></div>
 <div id="barra"><button id="bPanel">☰ Panel</button><button id="bEtiquetas">Etiquetas</button></div>
 <div id="panel">
   <h1>Taller — prototipo 3D</h1>
@@ -94,6 +108,7 @@
   </ul>
   </details>
 </div>
+<label id="desarme">Desarme <input id="rDesarme" type="range" min="0" max="100" value="0"></label>
 <div id="pill"><button id="prev">←</button><span id="pillLabel"></span><button id="next">→</button></div>
 
 <script type="module">
@@ -175,9 +190,13 @@ function capa(nombre, visible = true) {
 }
 
 // caja por esquinas mínimas (x0,y0,z0) y tamaño (w,h,d)
+// medidas aproximadas para el tooltip (cm, un decimal si hace falta)
+const cm = n => String(Math.round(n * 10) / 10).replace('.', ',');
+const alturas = (y0, y1) => `a ${cm(Math.min(y0, y1))}–${cm(Math.max(y0, y1))} del radier`;
 function caja(g, x0, y0, z0, w, h, d, m) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
   mesh.position.set(x0 + w / 2, y0 + h / 2, z0 + d / 2);
+  mesh.userData.medidas = `${cm(w)} × ${cm(h)} × ${cm(d)} cm (ancho × alto × fondo) · ${alturas(y0, y0 + h)}`;
   mesh.castShadow = mesh.receiveShadow = true;
   g.add(mesh); return mesh;
 }
@@ -187,6 +206,9 @@ function pieza(g, a, b, w, h, m) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, pa.distanceTo(pb)), m);
   mesh.position.copy(pa).add(pb).multiplyScalar(.5);
   mesh.lookAt(pb);
+  const [s1, s2] = [w, h].sort((u, v) => v - u);   // placas (membrana, sofito) se leen como largo × ancho y espesor
+  mesh.userData.medidas = (s1 >= 20 ? `${cm(pa.distanceTo(pb))} × ${cm(s1)} cm, espesor ${cm(s2)}` : `largo ${cm(pa.distanceTo(pb))} cm · sección ${cm(w)} × ${cm(h)}`)
+    + ` · ${alturas(a[1], b[1])}`;
   mesh.castShadow = mesh.receiveShadow = true;
   g.add(mesh); return mesh;
 }
@@ -196,18 +218,19 @@ function etiqueta(g, texto, x, y, z, duda = false) {
 }
 
 // ---------- Entorno ----------
+const nombrar = (mesh, nombre, capaNombre = 'Casa y entorno') => Object.assign(mesh.userData, { nombre, capa: capaNombre });
 const entorno = capa('Casa y entorno');
-caja(entorno, -120, -2, 0, 600, 2, 330, M.radier);
-caja(entorno, -120, -2, 330, 600, 2, 165, M.quebrado);
-caja(entorno, -120, -2, 495, 600, 1, 25, M.canal);
-caja(entorno, -120, -2, 520, 600, 2, 40, M.radier);
-caja(entorno, -120, 0, -25, 495, 230, 25, M.muro);          // esquina de la casa en x=375 (medido: 135 + 240)
-caja(entorno, -120, 230, -25, 495, 30, 25, M.cadena);
-caja(entorno, -120, 260, -25, 495, 240, 25, M.muroSup);
-caja(entorno, 135, 350, 0, 135, 98, 0.5, M.canal);           // ventana 2º piso: 135–270, alféizar 350, alto 98 (medido)
-caja(entorno, -18, 0, 0, 10, 160, 560, M.vecino);           // muralla vecino izq.
-caja(entorno, -18, 0, 560, 500, 160, 10, M.vecino);         // muralla otro vecino
-caja(entorno, 325, 280, 0, 25, 18, 8, M.perno);             // foco
+nombrar(caja(entorno, -120, -2, 0, 600, 2, 330, M.radier), 'radier');
+nombrar(caja(entorno, -120, -2, 330, 600, 2, 165, M.quebrado), 'radier quebrado');
+nombrar(caja(entorno, -120, -2, 495, 600, 1, 25, M.canal), 'canal de aguas lluvias');
+nombrar(caja(entorno, -120, -2, 520, 600, 2, 40, M.radier), 'radier del patio');
+nombrar(caja(entorno, -120, 0, -25, 495, 230, 25, M.muro), 'muro de la casa (1º piso)');          // esquina de la casa en x=375 (medido: 135 + 240)
+nombrar(caja(entorno, -120, 230, -25, 495, 30, 25, M.cadena), 'cadena de la casa');
+nombrar(caja(entorno, -120, 260, -25, 495, 240, 25, M.muroSup), 'muro de la casa (2º piso)');
+nombrar(caja(entorno, 135, 350, 0, 135, 98, 0.5, M.canal), 'ventana del 2º piso');           // ventana 2º piso: 135–270, alféizar 350, alto 98 (medido)
+nombrar(caja(entorno, -18, 0, 0, 10, 160, 560, M.vecino), 'muralla del vecino');           // muralla vecino izq.
+nombrar(caja(entorno, -18, 0, 560, 500, 160, 10, M.vecino), 'muralla del otro vecino');         // muralla otro vecino
+nombrar(caja(entorno, 325, 280, 0, 25, 18, 8, M.perno), 'foco');             // foco
 etiqueta(entorno, 'E ☀ mañana (frente)', 175, 5, 470, true);
 etiqueta(entorno, 'N (costado portón)', 460, 5, 150, true);
 etiqueta(entorno, 'S (costado mesa · luz difusa)', -60, 5, 150, true);
@@ -271,11 +294,44 @@ function dibujarModelo(m) {
       sct.position.set(...e.centro); g.add(sct);
     } else if (e.tipo === 'etiqueta') etiqueta(g, e.texto, ...e.posicion, e.duda);
     const nuevos = g.children.slice(antes);
+    const medidas = e.tipo === 'cilindro' ? `Ø ${cm(2 * e.radio)} cm · ${e.eje === 'x' || e.eje === 'z' ? 'largo' : 'alto'} ${cm(e.largo)} cm`
+      : e.tipo === 'cadena' ? `largo ${cm(e.a[1] - e.b[1])} cm`
+      : e.tipo === 'sector' ? `radio ${cm(e.radio)} cm`
+      : e.tipo === 'prisma' ? `alto ${cm(e.alto)} cm · ${alturas(e.y, e.y + e.alto)}` : null;
+    for (const o of nuevos) if (o.isMesh) { nombrar(o, e.nombre, e.capa); if (medidas) o.userData.medidas = medidas; }
+    // centro de la pieza entera (una cadena son muchos eslabones): el desarme la mueve de una vez
+    const bb = new THREE.Box3();
+    for (const o of nuevos) if (o.isMesh) { o.updateWorldMatrix(true, false); bb.expandByObject(o); }
+    if (!bb.isEmpty()) { const centro = bb.getCenter(new THREE.Vector3()); for (const o of nuevos) o.userData.c0 = centro; }
     delModelo.push(...nuevos); (porNombre[e.nombre] ??= []).push(...nuevos);
   }
 }
 const modelo = modeloTaller();
 dibujarModelo(modelo);
+
+// Desarme: separa solo lo que se construye; la casa, el piso del taller, los muebles y el desagüe quedan fijos.
+// Cada pieza se aleja de la casa (z) y del centro del frente (x); las capas altas además suben.
+// [alejamiento, subida en cm al 100 %]
+const DESARME = {
+  'Base (goma + solera)': [.15, 0], 'Esqueleto (pilares + vigas)': [.35, 40], 'Viga de apoyo en cadena': [.2, 40],
+  'Diagonales': [.5, 20], 'Portón corredizo (ADR 0005)': [.9, 0], 'Ventanas y extracción': [.6, 30],
+  'Paneles de muro': [.75, 20], 'Cielo interior (pendiente invertida)': [.1, 80], 'Techo': [.2, 140],
+  'Techo de las gatas (catio cerrado)': [.2, 210],
+};
+const rDesarme = document.getElementById('rDesarme'), cajaTmp = new THREE.Box3();
+function aplicarDesarme() {
+  const t = rDesarme.value / 100;
+  for (const [nombre, [alejar, subir]] of Object.entries(DESARME)) for (const o of capas[nombre]?.children ?? []) {
+    if (!o.userData.pos0) {   // posición y centro armados, guardados la primera vez
+      o.userData.pos0 = o.position.clone();
+      o.userData.c0 ??= o.isMesh ? (o.updateWorldMatrix(true, false), cajaTmp.setFromObject(o)).getCenter(new THREE.Vector3()) : o.position.clone();
+    }
+    const c = o.userData.c0;
+    o.position.copy(o.userData.pos0).add(new THREE.Vector3((c.x - ANCHO / 2) * alejar * t,
+      subir * Math.min(1, Math.max(0, c.y) / 250) * t, Math.max(0, c.z) * alejar * t));
+  }
+}
+rDesarme.oninput = aplicarDesarme;
 
 // Secciones del panel: verificaciones, piezas y opciones (la selección cambia especificaciones, no la geometría)
 const seleccion = {};
@@ -295,7 +351,7 @@ function mostrarModelo() {
   document.getElementById('precauciones').innerHTML = e.precauciones.map(p => `<li><b>${p.titulo}.</b> ${p.texto}</li>`).join('');
   document.getElementById('mantenimiento').innerHTML = e.mantenimiento.map(p => `<li><b>${p.cada}:</b> ${p.texto}</li>`).join('');
   for (const r of document.querySelectorAll('#opciones input'))
-    r.onchange = () => { seleccion[r.name.slice(3)] = r.value; mostrarModelo(); dibujarModelo(modeloTaller({}, seleccion)); };
+    r.onchange = () => { seleccion[r.name.slice(3)] = r.value; mostrarModelo(); dibujarModelo(modeloTaller({}, seleccion)); aplicarDesarme(); };
 }
 mostrarModelo();
 // documento para presupuesto: HTML autocontenido con la selección actual, para descargar e imprimir
@@ -427,10 +483,12 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight); labelRenderer.setSize(innerWidth, innerHeight);
 });
 // las etiquetas siguen la visibilidad de su capa
-// en celular las etiquetas parten apagadas (taparían el modelo); el botón Etiquetas las alterna
+// en celular las etiquetas parten apagadas (taparían el modelo); el botón Etiquetas las alterna (azul = encendidas)
 const esCelular = matchMedia('(max-width: 700px)').matches;
 let etiquetasOn = !esCelular;
-document.getElementById('bEtiquetas').onclick = () => { etiquetasOn = !etiquetasOn; };
+const bEtiquetas = document.getElementById('bEtiquetas');
+bEtiquetas.classList.toggle('on', etiquetasOn);
+bEtiquetas.onclick = () => { etiquetasOn = !etiquetasOn; bEtiquetas.classList.toggle('on', etiquetasOn); };
 document.getElementById('bPanel').onclick = () => document.body.classList.toggle('panel-abierto');
 function syncEtiquetas() {
   scene.traverse(o => {
@@ -439,7 +497,43 @@ function syncEtiquetas() {
     o.visible = v;
   });
 }
-renderer.setAnimationLoop(() => { controls.update(); syncEtiquetas(); renderer.render(scene, camera); labelRenderer.render(scene, camera); });
+// tooltip al pasar el mouse: nombre, medidas aproximadas y capa de la pieza bajo el cursor (en celular no hay hover)
+const tip = document.getElementById('tip'), rayo = new THREE.Raycaster(), puntero = new THREE.Vector2();
+let movPendiente = null;
+// la pieza bajo el cursor se pinta amarilla (los materiales son compartidos: se cambia el de esa malla y se devuelve al salir)
+const matResaltado = new THREE.MeshStandardMaterial({ color: 0xffd21f, emissive: 0x6b5200, transparent: true, opacity: .9, side: THREE.DoubleSide });
+let resaltado = null;
+function resaltar(mesh) {
+  if (resaltado?.mesh === mesh) return;
+  if (resaltado) resaltado.mesh.material = resaltado.material;
+  resaltado = mesh ? { mesh, material: mesh.material } : null;
+  if (mesh) mesh.material = matResaltado;
+}
+const ocultarTip = () => { tip.hidden = true; resaltar(null); };
+renderer.domElement.addEventListener('pointermove', e => {
+  movPendiente = e.pointerType === 'mouse' && !e.buttons ? e : null;   // arrastrando para rotar: sin tooltip
+  if (!movPendiente) ocultarTip();
+});
+for (const ev of ['pointerleave', 'wheel']) renderer.domElement.addEventListener(ev, () => { movPendiente = null; ocultarTip(); });
+const visibleDeVerdad = o => { for (; o; o = o.parent) if (!o.visible) return false; return true; };
+function actualizarTip() {
+  if (!movPendiente) return;
+  const e = movPendiente; movPendiente = null;
+  puntero.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  rayo.setFromCamera(puntero, camera);
+  const hits = rayo.intersectObjects(scene.children, true).filter(h => h.object.isMesh && visibleDeVerdad(h.object));
+  // las zonas casi transparentes (pasada, golpe, malla) no tapan lo que hay detrás
+  const mat = o => o === resaltado?.mesh ? resaltado.material : o.material;
+  const h = hits.find(h => !mat(h.object).transparent || mat(h.object).opacity >= .4) ?? hits[0];
+  const u = h?.object.userData;
+  if (!u?.nombre) { ocultarTip(); return; }
+  resaltar(h.object);
+  tip.innerHTML = `<b>${u.nombre[0].toUpperCase() + u.nombre.slice(1)}</b>${u.medidas ? `<br>${u.medidas}` : ''}<div class="espec">${u.capa}</div>`;
+  tip.hidden = false;
+  const x = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8), y = Math.min(e.clientY + 16, innerHeight - tip.offsetHeight - 8);
+  tip.style.left = x + 'px'; tip.style.top = y + 'px';
+}
+renderer.setAnimationLoop(() => { controls.update(); syncEtiquetas(); actualizarTip(); renderer.render(scene, camera); labelRenderer.render(scene, camera); });
 </script>
 </body>
 </html>
